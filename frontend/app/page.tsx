@@ -1,65 +1,214 @@
-import Image from "next/image";
+"use client";
+
+import { useEffect, useState } from "react";
+
+type Summary = {
+  backbone_nodes: number;
+  ixp_sites: number;
+  regions: number;
+  total_capacity_gbps: number;
+  active_links: number;
+  peak_utilization_pct: number;
+};
+
+type Region = {
+  name: string;
+  nodes: number;
+  traffic_index: number;
+};
+
+type Node = {
+  id: string;
+  name: string;
+  region: string;
+  capacity_gbps: number;
+};
+
+type IxpSite = {
+  id: string;
+  city: string;
+  region: string;
+  members: number;
+};
+
+const defaultSummary: Summary = {
+  backbone_nodes: 6,
+  ixp_sites: 5,
+  regions: 5,
+  total_capacity_gbps: 6200,
+  active_links: 6,
+  peak_utilization_pct: 84,
+};
+
+const defaultTopology = {
+  regions: [
+    { name: "Europe", nodes: 2, traffic_index: 94 },
+    { name: "North America", nodes: 2, traffic_index: 91 },
+    { name: "Asia Pacific", nodes: 1, traffic_index: 88 },
+    { name: "Middle East", nodes: 1, traffic_index: 76 },
+    { name: "Africa", nodes: 1, traffic_index: 69 },
+  ] as Region[],
+  backbone: [
+    { id: "LON-01", name: "London Core", region: "Europe", capacity_gbps: 1200 },
+    { id: "FRA-02", name: "Frankfurt Transit", region: "Europe", capacity_gbps: 980 },
+    { id: "JFK-03", name: "New York Gateway", region: "North America", capacity_gbps: 1400 },
+    { id: "SJC-04", name: "San Jose Edge", region: "North America", capacity_gbps: 890 },
+    { id: "DXB-05", name: "Dubai Hub", region: "Middle East", capacity_gbps: 760 },
+    { id: "SIN-06", name: "Singapore Exchange", region: "Asia Pacific", capacity_gbps: 1100 },
+  ] as Node[],
+  ixps: [
+    { id: "IXP-101", city: "London", region: "Europe", members: 220 },
+    { id: "IXP-202", city: "Frankfurt", region: "Europe", members: 190 },
+    { id: "IXP-303", city: "New York", region: "North America", members: 260 },
+    { id: "IXP-404", city: "Johannesburg", region: "Africa", members: 130 },
+    { id: "IXP-505", city: "Singapore", region: "Asia Pacific", members: 210 },
+  ] as IxpSite[],
+};
 
 export default function Home() {
+  const [summary, setSummary] = useState<Summary>(defaultSummary);
+  const [topology, setTopology] = useState(defaultTopology);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        const [summaryResponse, topologyResponse] = await Promise.all([
+          fetch("http://localhost:8000/api/network/summary"),
+          fetch("http://localhost:8000/api/network/topology"),
+        ]);
+
+        if (summaryResponse.ok) {
+          const summaryData = await summaryResponse.json();
+          setSummary(summaryData);
+        }
+
+        if (topologyResponse.ok) {
+          const topologyData = await topologyResponse.json();
+          setTopology(topologyData);
+        }
+      } catch (error) {
+        console.error("Unable to load network telemetry:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadData();
+  }, []);
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+    <main className="page-shell">
+      <section className="hero-panel">
+        <div>
+          <p className="eyebrow">Real Rails Intelligence Library</p>
+          <h1>Internet Backbone & IXP Map</h1>
+          <p className="subtitle">
+            Monitoring global routing health, interconnection density, and transit capacity across major
+            backbone corridors.
           </p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+        <div className="status-pill">{loading ? "Syncing" : "Live"}</div>
+      </section>
+
+      <section className="metrics-grid">
+        <article className="metric-card">
+          <span>Backbone nodes</span>
+          <strong>{summary.backbone_nodes}</strong>
+        </article>
+        <article className="metric-card">
+          <span>IXP sites</span>
+          <strong>{summary.ixp_sites}</strong>
+        </article>
+        <article className="metric-card">
+          <span>Regions</span>
+          <strong>{summary.regions}</strong>
+        </article>
+        <article className="metric-card">
+          <span>Total capacity</span>
+          <strong>{summary.total_capacity_gbps} Gbps</strong>
+        </article>
+      </section>
+
+      <section className="content-grid">
+        <div className="panel">
+          <div className="panel-header">
+            <h2>Regional load</h2>
+            <span>Peak {summary.peak_utilization_pct}%</span>
+          </div>
+
+          <div className="network-map">
+            <div className="map-node node-1">LON</div>
+            <div className="map-node node-2">JFK</div>
+            <div className="map-node node-3">SIN</div>
+            <div className="map-node node-4">DXB</div>
+            <div className="map-node node-5">FRA</div>
+            <div className="map-node node-6">SJC</div>
+            <div className="map-line line-1" />
+            <div className="map-line line-2" />
+            <div className="map-line line-3" />
+            <div className="map-line line-4" />
+            <div className="map-line line-5" />
+          </div>
         </div>
-      </main>
-    </div>
+
+        <div className="panel">
+          <div className="panel-header">
+            <h2>Backbone corridors</h2>
+            <span>{summary.active_links} active</span>
+          </div>
+          <ul className="list-stack">
+            {topology.backbone.map((node) => (
+              <li key={node.id}>
+                <div>
+                  <strong>{node.name}</strong>
+                  <small>{node.region}</small>
+                </div>
+                <span>{node.capacity_gbps} Gbps</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </section>
+
+      <section className="bottom-grid">
+        <div className="panel">
+          <div className="panel-header">
+            <h2>Region health</h2>
+          </div>
+          <div className="region-list">
+            {topology.regions.map((region) => (
+              <div className="region-item" key={region.name}>
+                <div>
+                  <strong>{region.name}</strong>
+                  <small>{region.nodes} backbone nodes</small>
+                </div>
+                <div className="bar-wrap">
+                  <span style={{ width: `${region.traffic_index}%` }} />
+                </div>
+                <em>{region.traffic_index}%</em>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="panel">
+          <div className="panel-header">
+            <h2>IXP hotspots</h2>
+          </div>
+          <ul className="list-stack compact">
+            {topology.ixps.map((site) => (
+              <li key={site.id}>
+                <div>
+                  <strong>{site.city}</strong>
+                  <small>{site.region}</small>
+                </div>
+                <span>{site.members} members</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </section>
+    </main>
   );
 }
