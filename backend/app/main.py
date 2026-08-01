@@ -1,39 +1,13 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 
-BACKBONE_NODES = [
-    {"id": "LON-01", "name": "London Core", "region": "Europe", "capacity_gbps": 1200},
-    {"id": "FRA-02", "name": "Frankfurt Transit", "region": "Europe", "capacity_gbps": 980},
-    {"id": "JFK-03", "name": "New York Gateway", "region": "North America", "capacity_gbps": 1400},
-    {"id": "SJC-04", "name": "San Jose Edge", "region": "North America", "capacity_gbps": 890},
-    {"id": "DXB-05", "name": "Dubai Hub", "region": "Middle East", "capacity_gbps": 760},
-    {"id": "SIN-06", "name": "Singapore Exchange", "region": "Asia Pacific", "capacity_gbps": 1100},
-]
+from app.adapters import load_network_data_adapter
+from app.data import (
+    get_network_dataset,
+)
 
-IXP_SITES = [
-    {"id": "IXP-101", "city": "London", "region": "Europe", "members": 220},
-    {"id": "IXP-202", "city": "Frankfurt", "region": "Europe", "members": 190},
-    {"id": "IXP-303", "city": "New York", "region": "North America", "members": 260},
-    {"id": "IXP-404", "city": "Johannesburg", "region": "Africa", "members": 130},
-    {"id": "IXP-505", "city": "Singapore", "region": "Asia Pacific", "members": 210},
-]
-
-REGIONS = [
-    {"name": "Europe", "nodes": 2, "traffic_index": 94},
-    {"name": "North America", "nodes": 2, "traffic_index": 91},
-    {"name": "Middle East", "nodes": 1, "traffic_index": 76},
-    {"name": "Asia Pacific", "nodes": 1, "traffic_index": 88},
-    {"name": "Africa", "nodes": 1, "traffic_index": 69},
-]
-
-LINKS = [
-    {"from": "LON-01", "to": "FRA-02", "capacity_gbps": 480},
-    {"from": "FRA-02", "to": "DXB-05", "capacity_gbps": 380},
-    {"from": "DXB-05", "to": "SIN-06", "capacity_gbps": 440},
-    {"from": "SIN-06", "to": "JFK-03", "capacity_gbps": 520},
-    {"from": "JFK-03", "to": "SJC-04", "capacity_gbps": 360},
-    {"from": "LON-01", "to": "JFK-03", "capacity_gbps": 430},
-]
+DATA_ADAPTER = load_network_data_adapter()
+DATASET = DATA_ADAPTER.get_dataset() or get_network_dataset()
 
 app = FastAPI(
     title="Internet Backbone & IXP Map API",
@@ -62,21 +36,81 @@ def root():
 
 @app.get("/api/network/summary")
 def network_summary():
+    summary = DATASET["summary"]
     return {
-        "backbone_nodes": len(BACKBONE_NODES),
-        "ixp_sites": len(IXP_SITES),
-        "regions": len(REGIONS),
-        "total_capacity_gbps": sum(node["capacity_gbps"] for node in BACKBONE_NODES),
-        "active_links": len(LINKS),
-        "peak_utilization_pct": 84,
+        "backbone_nodes": summary["backbone_nodes"],
+        "ixp_sites": summary["ixp_sites"],
+        "regions": summary["regions"],
+        "total_capacity_gbps": summary["total_capacity_gbps"],
+        "active_links": summary["active_links"],
+        "peak_utilization_pct": summary["peak_utilization_pct"],
     }
 
 
 @app.get("/api/network/topology")
 def network_topology():
     return {
-        "regions": REGIONS,
-        "backbone": BACKBONE_NODES,
-        "ixps": IXP_SITES,
-        "links": LINKS,
+        "regions": DATASET["regions"],
+        "backbone": DATASET["backbone"],
+        "ixps": DATASET["ixps"],
+        "links": DATASET["links"],
+        "landing_stations": DATASET["landing_stations"],
+        "corridors": DATASET["corridors"],
+    }
+
+
+@app.get("/api/network/facilities")
+def network_facilities():
+    return DATASET["facilities"]
+
+
+@app.get("/api/network/asns")
+def asn_index():
+    return DATASET["asns"]
+
+
+@app.get("/api/network/operators")
+def operator_index():
+    return DATASET["operators"]
+
+
+@app.get("/api/network/path-concentration")
+def path_concentration():
+    return DATASET["path_concentration"]
+
+
+@app.get("/api/network/filters")
+def network_filters():
+    return {
+        "regions": [region["name"] for region in DATASET["regions"]],
+        "operators": [operator["name"] for operator in DATASET["operators"]],
+        "ixps": [ixp["name"] for ixp in DATASET["ixps"]],
+    }
+
+
+@app.get("/api/network/route-simulation")
+def route_simulation(
+    ixp: str | None = Query(default=None, alias="ixp"),
+    facility: str | None = Query(default=None, alias="facility"),
+    cable: str | None = Query(default=None, alias="cable"),
+):
+    return DATA_ADAPTER.get_route_simulation(ixp=ixp, facility=facility, cable=cable)
+
+
+@app.get("/api/network/why-this-matters")
+def why_this_matters():
+    return {
+        "headline": "The internet is a shared operating system for the modern economy.",
+        "copy": [
+            "When a single exchange or cable corridor is interrupted, the impact spreads beyond one city or region. Traffic reroutes across broader transit systems, driving congestion and delay in markets that depend on digital commerce and cloud access.",
+            "This dashboard helps identify where internet infrastructure is concentrated, who owns the critical nodes, and which routes are most exposed to service disruption.",
+        ],
+    }
+
+
+@app.get("/api/network/who-controls-the-rail")
+def who_controls_the_rail():
+    return {
+        "summary": "A handful of operators control the majority of terrestrial and peering capacity behind global connectivity.",
+        "operators": DATASET["operators"],
     }
