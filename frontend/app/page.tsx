@@ -75,6 +75,7 @@ type SimulationResult = {
   selected_facility: string;
   selected_cable: string;
   failed_route?: string;
+  rerouted_route?: string;
   affected_traffic: string;
   impacted_regions: string[];
   impacted_facilities: string[];
@@ -92,7 +93,7 @@ const defaultSummary: Summary = {
   ixp_sites: 5,
   regions: 5,
   total_capacity_gbps: 6200,
-  active_links: 6,
+  active_links: 8,
   peak_utilization_pct: 84,
 };
 
@@ -125,9 +126,13 @@ const defaultTopology = {
     { id: "LS-03", name: "Mumbai Landing Station", country: "India", region: "Asia Pacific", lat: 19.076, lng: 72.8777 },
   ],
   corridors: [
-    { id: "C-101", name: "SEA-ME-WE-3", from: "London", to: "Singapore", capacity_gbps: 480, congestion_score: 76, regional_dependency: "Europe-Asia", redundancy_score: 68 },
-    { id: "C-102", name: "Atlantic Crossing", from: "London", to: "New York", capacity_gbps: 430, congestion_score: 71, regional_dependency: "Europe-North America", redundancy_score: 74 },
-    { id: "C-103", name: "Pacific Transit", from: "Singapore", to: "San Jose", capacity_gbps: 520, congestion_score: 82, regional_dependency: "Asia-Pacific", redundancy_score: 62 },
+    { id: "C-101", name: "London ↔ Frankfurt", from: "London", to: "Frankfurt", capacity_gbps: 480, congestion_score: 76, regional_dependency: "Europe", redundancy_score: 68 },
+    { id: "C-106", name: "Indian Ocean Transit", from: "Singapore", to: "Johannesburg", capacity_gbps: 410, congestion_score: 67, regional_dependency: "Asia-Africa", redundancy_score: 73 },
+    { id: "C-102", name: "London ↔ New York", from: "London", to: "New York", capacity_gbps: 430, congestion_score: 71, regional_dependency: "Atlantic", redundancy_score: 74 },
+    { id: "C-103", name: "Frankfurt ↔ Singapore", from: "Frankfurt", to: "Singapore", capacity_gbps: 520, congestion_score: 82, regional_dependency: "Europe-Middle East", redundancy_score: 62 },
+    { id: "C-105", name: "New York ↔ Singapore", from: "New York", to: "Singapore", capacity_gbps: 500, congestion_score: 75, regional_dependency: "Global", redundancy_score: 65 },
+    { id: "C-104", name: "Frankfurt ↔ Dubai", from: "Frankfurt", to: "Dubai", capacity_gbps: 380, congestion_score: 69, regional_dependency: "Europe-Middle East", redundancy_score: 71 },
+    { id: "C-107", name: "Dubai ↔ Singapore", from: "Dubai", to: "Singapore", capacity_gbps: 440, congestion_score: 73, regional_dependency: "Middle East-Asia", redundancy_score: 66 },
   ],
 } as const;
 
@@ -153,9 +158,9 @@ const defaultOperators: Operator[] = [
 
 const defaultPathConcentration: PathConcentration = {
   most_critical: [
-    { name: "SEA-ME-WE-3", congestion_score: 82, regional_dependency: "High", redundancy_score: 64 },
-    { name: "Atlantic Crossing", congestion_score: 75, regional_dependency: "Medium", redundancy_score: 76 },
-    { name: "Pacific Transit", congestion_score: 88, regional_dependency: "High", redundancy_score: 58 },
+    { name: "Frankfurt ↔ Singapore", congestion_score: 82, regional_dependency: "High", redundancy_score: 62 },
+    { name: "London ↔ New York", congestion_score: 75, regional_dependency: "Medium", redundancy_score: 74 },
+    { name: "New York ↔ Singapore", congestion_score: 88, regional_dependency: "High", redundancy_score: 58 },
   ],
   dependency_index: 7.4,
   redundancy_rating: 71,
@@ -165,8 +170,9 @@ const defaultSimulation: SimulationResult = {
   status: "degraded",
   selected_ixp: "London",
   selected_facility: "Equinix LD8",
-  selected_cable: "SEA-ME-WE-3",
+  selected_cable: "Frankfurt ↔ Singapore",
   failed_route: undefined,
+  rerouted_route: undefined,
   affected_traffic: "842 Gbps",
   impacted_regions: ["Europe", "Middle East"],
   impacted_facilities: ["Equinix LD8", "Telehouse North", "SIN-IX Core"],
@@ -216,32 +222,50 @@ function getCorridorImpactRegions(corridor?: { regional_dependency: string; from
     "Europe-North America": ["Europe", "North America"],
     "Asia-Pacific": ["Asia Pacific", "North America"],
     "Middle East-Europe": ["Middle East", "Europe"],
+    Europe: ["Europe"],
+    Atlantic: ["Europe", "North America"],
+    "Europe-Middle East": ["Europe", "Middle East"],
+    "Middle East-Asia": ["Middle East", "Asia Pacific"],
+    "Asia-Africa": ["Asia Pacific", "Africa"],
+    Global: ["Europe", "North America", "Asia Pacific"],
   };
 
   return dependencyMap[corridor.regional_dependency] ?? [corridor.from, corridor.to];
 }
 
-function buildAlternativePaths(routeName: string) {
+function buildAlternativePaths(routeName: string, backupRoute?: { from: string; to: string } | null) {
+  if (backupRoute) {
+    return [
+      { route: `${backupRoute.from} → ${backupRoute.to}`, status: "rerouted" },
+      { route: `${backupRoute.from} → Dubai → ${backupRoute.to}`, status: "degraded" },
+    ];
+  }
+
   switch (routeName) {
-    case "Atlantic Crossing":
+    case "London ↔ New York":
       return [
-        { route: "London -> Frankfurt -> Dubai", status: "rerouted" },
-        { route: "London -> Singapore -> New York", status: "degraded" },
+        { route: "London → Frankfurt → Dubai → Singapore → New York", status: "rerouted" },
+        { route: "London → Frankfurt → New York", status: "degraded" },
       ];
-    case "SEA-ME-WE-3":
+    case "Frankfurt ↔ Singapore":
       return [
-        { route: "London -> New York -> Singapore", status: "rerouted" },
-        { route: "London -> Frankfurt -> Dubai", status: "degraded" },
+        { route: "Frankfurt → Dubai → Singapore", status: "rerouted" },
+        { route: "Frankfurt → London → New York → Singapore", status: "degraded" },
       ];
-    case "Pacific Transit":
+    case "London ↔ Frankfurt":
       return [
-        { route: "Singapore -> Dubai -> Frankfurt", status: "rerouted" },
-        { route: "San Jose -> New York -> London", status: "degraded" },
+        { route: "London → New York → Frankfurt", status: "rerouted" },
+        { route: "London → Dubai → Frankfurt", status: "degraded" },
       ];
-    case "Red Sea Link":
+    case "New York ↔ Singapore":
       return [
-        { route: "Dubai -> London -> New York", status: "rerouted" },
-        { route: "Dubai -> Singapore -> San Jose", status: "degraded" },
+        { route: "New York → London → Frankfurt → Dubai → Singapore", status: "rerouted" },
+        { route: "New York → London → Singapore", status: "degraded" },
+      ];
+    case "Indian Ocean Transit":
+      return [
+        { route: "Singapore → Dubai → Frankfurt → London", status: "rerouted" },
+        { route: "Johannesburg → London → Singapore", status: "degraded" },
       ];
     default:
       return [
@@ -347,7 +371,7 @@ export default function Home() {
         const params = new URLSearchParams({
           ixp: filters.ixp === "All IXPs" ? "London" : filters.ixp,
           facility: filteredFacilities[0]?.facility_name ?? "Equinix LD8",
-          cable: "SEA-ME-WE-3",
+          cable: "Frankfurt ↔ Singapore",
         });
         const response = await fetch(`http://localhost:8000/api/network/route-simulation?${params.toString()}`);
         if (response.ok) {
@@ -360,7 +384,7 @@ export default function Home() {
     };
 
     loadSimulation();
-  }, [filters.ixp, filteredFacilities]);
+  }, []);
 
   const mapMarkers = useMemo(() => {
     return [
@@ -370,55 +394,107 @@ export default function Home() {
     ] as Array<{ id: string; name: string; type: "IXP" | "Cable Landing" | "Facility"; lat: number; lng: number; region?: string; capacity?: number; connected_networks?: number; members?: number }>;
   }, [facilities, topology.ixps, topology.landing_stations]);
 
-  const selectedFacility = useMemo(
-    () => facilities.find((facility) => facility.facility_name === simulation.selected_facility) ?? filteredFacilities[0] ?? facilities[0],
-    [facilities, filteredFacilities, simulation.selected_facility],
-  );
+  const selectedFacility = useMemo(() => {
+      if (!simulation.selected_facility) return null;
+
+      return (
+          facilities.find(
+              (facility) =>
+                  facility.facility_name === simulation.selected_facility
+          ) ?? null
+      );
+  }, [facilities, simulation.selected_facility]);
 
   const selectedCorridor = useMemo(
     () => topology.corridors.find((corridor) => corridor.name === simulation.selected_cable) ?? topology.corridors[0],
     [simulation.selected_cable, topology.corridors],
   );
+  const backupRouteMap: Record<string, string> = {
+    "London ↔ Frankfurt": "London ↔ New York",
+    "London ↔ New York": "Frankfurt ↔ Dubai",
+    "Frankfurt ↔ Dubai": "Dubai ↔ Singapore",
+    "Dubai ↔ Singapore": "London ↔ Frankfurt",
+    "Frankfurt ↔ Singapore": "Frankfurt ↔ Dubai",
+    "New York ↔ Singapore": "London ↔ New York",
+    "Indian Ocean Transit": "Dubai ↔ Singapore",
+  };
 
+  const failedCorridor = useMemo(
+    () => topology.corridors.find((corridor) => corridor.name === simulation.failed_route) ?? null,
+    [simulation.failed_route, topology.corridors],
+  );
+
+  const backupCorridor = useMemo(
+    () => topology.corridors.find((corridor) => corridor.name === simulation.rerouted_route) ?? null,
+    [simulation.rerouted_route, topology.corridors],
+  );
   const simulateSelectedCorridorFailure = () => {
     if (!selectedCorridor) {
       return;
     }
 
-    const riskLevel = getCorridorRiskLevel(selectedCorridor);
-    const impactRegions = getCorridorImpactRegions(selectedCorridor);
-    const trafficUtilization = clamp(selectedCorridor.congestion_score + 11, 0, 100);
+  const riskLevel = getCorridorRiskLevel(selectedCorridor);
+  const impactRegions = getCorridorImpactRegions(selectedCorridor);
+  const trafficUtilization = clamp(
+    selectedCorridor.congestion_score + 11,
+    0,
+    100
+  );
 
-    setSimulation((prev) => ({
-      ...prev,
-      status: "critical",
-      failed_route: selectedCorridor.name,
-      selected_cable: selectedCorridor.name,
-      affected_traffic: `${Math.round(selectedCorridor.capacity_gbps * 1.8)} Gbps`,
-      impacted_regions: impactRegions,
-      impacted_facilities: [selectedFacility?.facility_name ?? prev.selected_facility, "Telehouse North", "SIN-IX Core"].filter(Boolean).slice(0, 3),
-      recalculated_paths: buildAlternativePaths(selectedCorridor.name),
-      metrics: {
-        new_congestion: trafficUtilization,
-        redundancy_drop: clamp(100 - selectedCorridor.redundancy_score, 0, 100),
-        regional_impact: riskLevel,
-        recovery_window_hours: selectedCorridor.capacity_gbps >= 500 ? 6 : 4,
-      },
-    }));
+  const backupRouteName = backupRouteMap[selectedCorridor.name];
 
-    setSummary((prev) => ({
-      ...prev,
-      active_links: Math.max(0, prev.active_links - 1),
-      peak_utilization_pct: clamp(prev.peak_utilization_pct + 8, 0, 100),
-      total_capacity_gbps: Math.max(0, prev.total_capacity_gbps - selectedCorridor.capacity_gbps),
-    }));
-  };
+  const backupRoute =
+    topology.corridors.find(
+      (route) => route.name === backupRouteName
+    ) ?? null;
+
+  setSimulation((prev) => ({
+    ...prev,
+    status: "rerouted",
+    failed_route: selectedCorridor.name,
+    rerouted_route: backupRoute ? backupRoute.name : undefined,
+    affected_traffic: `${Math.round(selectedCorridor.capacity_gbps * 1.8)} Gbps`,
+    impacted_regions: impactRegions,
+    impacted_facilities: [
+      selectedFacility?.facility_name ?? prev.selected_facility,
+      "Telehouse North",
+      "SIN-IX Core",
+    ]
+      .filter(Boolean)
+      .slice(0, 3),
+    recalculated_paths: buildAlternativePaths(selectedCorridor.name, backupRoute),
+    metrics: {
+      new_congestion: clamp(
+        backupRoute ? backupRoute.congestion_score + 18 : trafficUtilization,
+        0,
+        100
+      ),
+      redundancy_drop: clamp(100 - selectedCorridor.redundancy_score, 0, 100),
+      regional_impact: riskLevel,
+      recovery_window_hours: selectedCorridor.capacity_gbps >= 500 ? 6 : 4,
+    },
+  }));
+
+  setSummary((prev) => ({
+    ...prev,
+    active_links: Math.max(0, prev.active_links - 1),
+    peak_utilization_pct: clamp(
+      prev.peak_utilization_pct + 8,
+      0,
+      100
+    ),
+    total_capacity_gbps: Math.max(
+      0,
+      prev.total_capacity_gbps - selectedCorridor.capacity_gbps
+    ),
+  }));
+};
 
   const updateSimulationSelection = (field: "selected_ixp" | "selected_facility" | "selected_cable", value: string) => {
-    setSimulation((prev) => ({
-      ...prev,
-      [field]: value,
-      ...(field === "selected_cable" ? { failed_route: undefined, status: prev.status === "critical" ? "degraded" : prev.status } : {}),
+    setSimulation(prev => ({
+        ...prev,
+        [field]: value,
+        ...(field === "selected_cable" ? { failed_route: undefined, rerouted_route: undefined, status: "degraded" } : {}),
     }));
 
     if (field === "selected_ixp") {
@@ -430,332 +506,445 @@ export default function Home() {
     }
   };
 
-  const mapRoutes = [
-    { id: "LON-FRA", name: "Atlantic Crossing", positions: [[51.5074, -0.1278], [50.1109, 8.6821]] as [number, number][] },
-    { id: "FRA-DXB", name: "Red Sea Link", positions: [[50.1109, 8.6821], [25.2048, 55.2708]] as [number, number][] },
-    { id: "DXB-SIN", name: "SEA-ME-WE-3", positions: [[25.2048, 55.2708], [1.3521, 103.8198]] as [number, number][] },
-    { id: "LON-NYC", name: "Atlantic Crossing", positions: [[51.5074, -0.1278], [40.7128, -74.006]] as [number, number][] },
-    { id: "SIN-JHB", name: "SEA-ME-WE-3", positions: [[1.3521, 103.8198], [-26.2041, 28.0473]] as [number, number][] },
-  ];
-
   return (
-    <main className="page-shell real-rails-shell">
-      <section className="hero-panel real-rails-header">
+    <div className="flex-1 flex flex-col w-full h-full overflow-hidden bg-[#030712] m-0 p-0">
+      <header className="flex items-center justify-between px-6 py-4 border-b border-[#1F2937] bg-[#0B1117] shrink-0">
         <div>
-          <p className="eyebrow">Real Rails Intelligence Library</p>
-          <h1>Internet Backbone & IXP Map</h1>
-          <p className="subtitle">
-            Monitoring global routing health, interconnection density, and transit capacity across major
-            backbone corridors.
-          </p>
+          <span className="text-xs uppercase tracking-wider text-[#38BDF8] font-semibold">Real Rails Intelligence Library</span>
+          <h1 className="text-xl font-bold text-slate-100">Internet Backbone & IXP Map</h1>
         </div>
-        <div className="status-pill">{loading ? "Syncing" : "Live"}</div>
-      </section>
-
-      <section className="metrics-grid">
-        <article className="metric-card">
-          <span>Backbone nodes</span>
-          <strong>{summary.backbone_nodes}</strong>
-        </article>
-        <article className="metric-card">
-          <span>IXP sites</span>
-          <strong>{summary.ixp_sites}</strong>
-        </article>
-        <article className="metric-card">
-          <span>Regions</span>
-          <strong>{summary.regions}</strong>
-        </article>
-        <article className="metric-card">
-          <span>Total capacity</span>
-          <strong>{summary.total_capacity_gbps} Gbps</strong>
-        </article>
-      </section>
-
-      <section className="main-layout">
-        <div className="map-panel panel">
-          <div className="panel-header">
-            <h2>Global interconnection map</h2>
-            <span>Peak {summary.peak_utilization_pct}%</span>
+        <div className="flex items-center gap-4">
+          <div className="text-sm text-slate-400">
+            Peak <span className="text-[#38BDF8] font-semibold">{summary.peak_utilization_pct}%</span>
           </div>
-
-          <MapView
-            topology={topology}
-            facilities={facilities}
-            simulation={simulation}
-            setSimulation={setSimulation}
-            filters={filters}
-            setFilters={setFilters}
-            mapFilters={mapFilters}
-            setMapFilters={setMapFilters}
-            pathConcentration={pathConcentration}
-          />
+          <div className="px-3 py-1 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+            {loading ? "Syncing" : "Live"}
+          </div>
         </div>
+      </header>
 
-        <aside className="sidebar panel">
-          <div className="sidebar-section">
-            <h3>Key Metrics</h3>
-            <div className="sidebar-kpis">
-              <div>
-                <span>Active links</span>
-                <strong>{summary.active_links}</strong>
+      <div className="flex-1 flex flex-row w-full h-[calc(100vh-73px)] overflow-hidden">
+        <section className="w-[70%] h-full flex flex-col border-r border-[#1F2937] bg-[#030712] overflow-y-auto">
+          <div className="p-4 grid grid-cols-4 gap-4 shrink-0">
+            <article className="bg-[#0B1117] border border-[#1F2937] rounded-lg p-3 flex flex-col">
+              <span className="text-xs text-slate-400 font-medium">Backbone nodes</span>
+              <strong className="text-lg font-bold text-slate-100 mt-1">{summary.backbone_nodes}</strong>
+            </article>
+            <article className="bg-[#0B1117] border border-[#1F2937] rounded-lg p-3 flex flex-col">
+              <span className="text-xs text-slate-400 font-medium">IXP sites</span>
+              <strong className="text-lg font-bold text-slate-100 mt-1">{summary.ixp_sites}</strong>
+            </article>
+            <article className="bg-[#0B1117] border border-[#1F2937] rounded-lg p-3 flex flex-col">
+              <span className="text-xs text-slate-400 font-medium">Regions</span>
+              <strong className="text-lg font-bold text-slate-100 mt-1">{summary.regions}</strong>
+            </article>
+            <article className="bg-[#0B1117] border border-[#1F2937] rounded-lg p-3 flex flex-col">
+              <span className="text-xs text-slate-400 font-medium">Total capacity</span>
+              <strong className="text-lg font-bold text-slate-100 mt-1">{summary.total_capacity_gbps} Gbps</strong>
+            </article>
+          </div>
+
+          <div className="px-4 flex-1 flex flex-col min-h-[450px]">
+            <div className="bg-[#0B1117] border border-[#1F2937] rounded-lg flex-1 flex flex-col overflow-hidden relative">
+              <MapView
+                topology={topology}
+                facilities={facilities}
+                simulation={simulation}
+                setSimulation={setSimulation}
+                filters={filters}
+                setFilters={setFilters}
+                mapFilters={mapFilters}
+                setMapFilters={setMapFilters}
+                pathConcentration={pathConcentration}
+              />
+            </div>
+          </div>
+
+          <div className="p-4 grid grid-cols-2 gap-4 shrink-0">
+            <div className="bg-[#0B1117] border border-[#1F2937] rounded-lg p-4">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-sm font-semibold text-slate-200">Facility cards</h2>
+                <span className="text-xs text-[#38BDF8]">{filteredFacilities.length} active</span>
               </div>
-              <div>
-                <span>Traffic</span>
-                <strong>{simulation.affected_traffic}</strong>
+              <div className="grid grid-cols-2 gap-3">
+                {filteredFacilities.slice(0, 4).map((facility) => (
+                  <article
+                    key={facility.id}
+                    className={`bg-[#030712] border border-[#1F2937] rounded p-3 flex flex-col gap-2 ${
+                      filteredFacilities.length === 1 ? "col-span-2" : ""
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <strong className="text-xs font-semibold text-slate-200 truncate">
+                        {facility.facility_name}
+                      </strong>
+                      <span className="text-[10px] text-slate-400">
+                        {facility.country}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-1 text-[11px]">
+                      <div>
+                        <span className="text-slate-500 block">Operator</span>
+                        <span className="text-slate-300 truncate block">
+                          {facility.operator}
+                        </span>
+                      </div>
+
+                      <div>
+                        <span className="text-slate-500 block">Networks</span>
+                        <span className="text-slate-300 block">
+                          {facility.connected_networks}
+                        </span>
+                      </div>
+
+                      <div>
+                        <span className="text-slate-500 block">Capacity</span>
+                        <span className="text-slate-300 block">
+                          {facility.capacity} Gbps
+                        </span>
+                      </div>
+
+                      <div>
+                        <span className="text-slate-500 block">Score</span>
+                        <span className="text-slate-300 block">
+                          {facility.importance_score}
+                        </span>
+                      </div>
+                    </div>
+                  </article>
+                ))}
               </div>
-              <div>
-                <span>Risk</span>
-                <strong>{simulation.metrics.regional_impact}</strong>
+            </div>
+
+            <div className="bg-[#0B1117] border border-[#1F2937] rounded-lg p-4 flex flex-col">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-sm font-semibold text-slate-200">Path concentration</h2>
+              </div>
+              <div className="flex flex-col gap-2.5 flex-1 justify-center">
+                {pathConcentration.most_critical.map((item) => (
+                  <div key={item.name} className="bg-[#030712] border border-[#1F2937] rounded p-2.5 flex items-center justify-between">
+                    <div>
+                      <strong className="text-xs font-semibold text-slate-200 block">{item.name}</strong>
+                      <small className="text-[10px] text-slate-400">{item.regional_dependency}</small>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <div className="text-right">
+                        <span className="text-xs font-bold text-amber-400 block">{item.congestion_score}%</span>
+                        <small className="text-[9px] text-slate-500">Congestion</small>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-xs font-bold text-[#38BDF8] block">{item.redundancy_score}%</span>
+                        <small className="text-[9px] text-slate-500">Redundancy</small>
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           </div>
 
-          <div className="sidebar-section">
-            <h3>Selected IXP</h3>
-            <p>
-              <strong>{simulation.selected_ixp}</strong> is the active route anchor, with operational exposure concentrated in {simulation.impacted_regions.join(", ")}.
-            </p>
-            <div className="sidebar-kpis">
-              <div>
-                <span>Facility</span>
-                <strong>{selectedFacility?.facility_name ?? simulation.selected_facility}</strong>
+          <div className="px-4 pb-4 grid grid-cols-2 gap-4 shrink-0">
+            <div className="bg-[#0B1117] border border-[#1F2937] rounded-lg p-4">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-sm font-semibold text-slate-200">Route failure simulation</h2>
+                <span className="text-xs px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">{simulation.status}</span>
               </div>
-              <div>
-                <span>Capacity</span>
-                <strong>{selectedFacility?.capacity ?? 2400} Gbps</strong>
+              <div className="grid grid-cols-3 gap-2 mb-3">
+                <label className="flex flex-col gap-1 text-xs">
+                  <span className="text-slate-400">IXP</span>
+                  <select className="bg-[#030712] border border-[#1F2937] rounded p-1 text-slate-200 text-xs" value={simulation.selected_ixp} onChange={(event) => updateSimulationSelection("selected_ixp", event.target.value)}>
+                    {topology.ixps.map((ixp) => (
+                      <option key={ixp.id} value={ixp.name}>{ixp.name}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1 text-xs">
+                  <span className="text-slate-400">Facility</span>
+                  <select className="bg-[#030712] border border-[#1F2937] rounded p-1 text-slate-200 text-xs" value={simulation.selected_facility} onChange={(event) => updateSimulationSelection("selected_facility", event.target.value)}>
+                    {facilities.map((facility) => (
+                      <option key={facility.id} value={facility.facility_name}>{facility.facility_name}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1 text-xs">
+                  <span className="text-slate-400">Cable</span>
+                  <select className="bg-[#030712] border border-[#1F2937] rounded p-1 text-slate-200 text-xs" value={simulation.selected_cable} onChange={(event) => updateSimulationSelection("selected_cable", event.target.value)}>
+                    {topology.corridors.map((corridor) => (
+                      <option key={corridor.id} value={corridor.name}>{corridor.name}</option>
+                    ))}
+                  </select>
+                </label>
               </div>
-              <div>
-                <span>Connected networks</span>
-                <strong>{selectedFacility?.connected_networks ?? 118}</strong>
+              <div className="bg-[#030712] border border-[#1F2937] rounded p-2.5 flex items-center justify-between text-xs mb-2">
+                <div>
+                  <span className="text-slate-500 block text-[10px]">Affected traffic</span>
+                  <strong className="text-slate-200 font-semibold">{simulation.affected_traffic}</strong>
+                </div>
+                <div>
+                  <span className="text-slate-500 block text-[10px]">Impacted regions</span>
+                  <strong className="text-slate-200 font-semibold">{simulation.impacted_regions.join(", ")}</strong>
+                </div>
               </div>
-              <div>
-                <span>Importance score</span>
-                <strong>{selectedFacility?.importance_score ?? 98}</strong>
+              <ul className="flex flex-col gap-1.5">
+                {simulation.recalculated_paths.map((path) => (
+                  <li key={path.route} className="bg-[#030712]/50 border border-[#1F2937]/50 rounded px-2.5 py-1.5 flex items-center justify-between text-[11px]">
+                    <span className="text-slate-300">{path.route}</span>
+                    <em className="text-amber-400 not-italic font-medium">{path.status}</em>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            <div className="bg-[#0B1117] border border-[#1F2937] rounded-lg p-4 flex flex-col">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-sm font-semibold text-slate-200">Who controls the rail</h2>
+              </div>
+              <ul className="flex flex-col gap-2 flex-1 justify-center">
+                {operators.map((operator) => (
+                  <li key={operator.name} className="bg-[#030712] border border-[#1F2937] rounded p-2 flex items-center justify-between text-xs">
+                    <div>
+                      <strong className="text-slate-200 font-semibold block">{operator.name}</strong>
+                      <small className="text-[10px] text-slate-400">{operator.ownership}</small>
+                    </div>
+                    <span className="text-[11px] font-medium text-[#38BDF8] bg-[#38BDF8]/10 px-2 py-0.5 rounded border border-[#38BDF8]/20">{operator.influence}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <aside className="w-[30%] h-full bg-[#0B1117] border-l border-[#1F2937] flex flex-col overflow-y-auto p-4 gap-5">
+          <div className="bg-[#030712] border border-[#1F2937] rounded-lg p-4">
+            <h3 className="text-xs font-semibold text-[#38BDF8] uppercase tracking-wider mb-3">Key Metrics</h3>
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <div className="bg-[#0B1117] border border-[#1F2937] rounded p-2">
+                <span className="text-[10px] text-slate-400 block">Active links</span>
+                <strong className="text-sm font-bold text-slate-100">{summary.active_links}</strong>
+              </div>
+              <div className="bg-[#0B1117] border border-[#1F2937] rounded p-2">
+                <span className="text-[10px] text-slate-400 block">Traffic</span>
+                <strong className="text-sm font-bold text-slate-100">{simulation.affected_traffic}</strong>
+              </div>
+              <div className="bg-[#0B1117] border border-[#1F2937] rounded p-2">
+                <span className="text-[10px] text-slate-400 block">Risk</span>
+                <strong className="text-sm font-bold text-amber-400">{simulation.metrics.regional_impact}</strong>
               </div>
             </div>
           </div>
 
-          <div className="sidebar-section">
-            <h3>Selected Corridor</h3>
-            <p>
-              <strong>{selectedCorridor?.name ?? simulation.selected_cable}</strong> is the active backbone route in the intelligence layer.
+          <div className="bg-[#030712] border border-[#1F2937] rounded-lg p-4 flex flex-col gap-3">
+            <h3 className="text-xs font-semibold text-[#38BDF8] uppercase tracking-wider">Selected IXP</h3>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              <strong className="text-slate-100">Active Route:</strong>{" "}
+              {simulation.selected_ixp || "--"} 
             </p>
-            <div className="sidebar-kpis">
-              <div>
-                <span>Source</span>
-                <strong>{selectedCorridor?.from ?? "Unknown"}</strong>
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div className="bg-[#0B1117] border border-[#1F2937] rounded p-2">
+                <span className="text-[10px] text-slate-400 block">Facility</span>
+                <strong className="text-slate-200 truncate block">
+                  {selectedFacility?.facility_name || simulation.selected_facility || "--"}
+                </strong>
               </div>
-              <div>
-                <span>Destination</span>
-                <strong>{selectedCorridor?.to ?? "Unknown"}</strong>
+              <div className="bg-[#0B1117] border border-[#1F2937] rounded p-2">
+                <span className="text-[10px] text-slate-400 block">Capacity</span>
+                <strong className="text-slate-200 block">{selectedFacility?.capacity ?? 2400} Gbps</strong>
               </div>
-              <div>
-                <span>Capacity</span>
-                <strong>{selectedCorridor?.capacity_gbps ?? 0} Gbps</strong>
+              <div className="bg-[#0B1117] border border-[#1F2937] rounded p-2">
+                <span className="text-[10px] text-slate-400 block">Connected networks</span>
+                <strong className="text-slate-200 block">{selectedFacility?.connected_networks ?? 118}</strong>
               </div>
-              <div>
-                <span>Traffic utilization</span>
-                <strong>{selectedCorridor ? clamp(selectedCorridor.congestion_score + 11, 0, 100) : 0}%</strong>
-              </div>
-              <div>
-                <span>Risk level</span>
-                <strong>{getCorridorRiskLevel(selectedCorridor)}</strong>
-              </div>
-              <div>
-                <span>Regional dependency</span>
-                <strong>{selectedCorridor?.regional_dependency ?? "Unknown"}</strong>
+              <div className="bg-[#0B1117] border border-[#1F2937] rounded p-2">
+                <span className="text-[10px] text-slate-400 block">Importance score</span>
+                <strong className="text-slate-200 block">{selectedFacility?.importance_score ?? 98}</strong>
               </div>
             </div>
-            <button type="button" className="download-button corridor-action-button" onClick={simulateSelectedCorridorFailure}>
+          </div>
+
+          <div className="bg-[#030712] border border-[#1F2937] rounded-lg p-4 flex flex-col gap-3">
+            <h3 className="text-xs font-semibold text-[#38BDF8] uppercase tracking-wider">Selected Corridor</h3>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              <strong className="text-slate-100">{selectedCorridor?.name ?? simulation.selected_cable}</strong> is the active backbone route in the intelligence layer.
+            </p>
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div className="bg-[#0B1117] border border-[#1F2937] rounded p-2">
+                <span className="text-[10px] text-slate-400 block">Source</span>
+                <strong className="text-slate-200 truncate block">{selectedCorridor?.from ?? "Unknown"}</strong>
+              </div>
+              <div className="bg-[#0B1117] border border-[#1F2937] rounded p-2">
+                <span className="text-[10px] text-slate-400 block">Destination</span>
+                <strong className="text-slate-200 truncate block">{selectedCorridor?.to ?? "Unknown"}</strong>
+              </div>
+              <div className="bg-[#0B1117] border border-[#1F2937] rounded p-2">
+                <span className="text-[10px] text-slate-400 block">Capacity</span>
+                <strong className="text-slate-200 block">{selectedCorridor?.capacity_gbps ?? 0} Gbps</strong>
+              </div>
+              <div className="bg-[#0B1117] border border-[#1F2937] rounded p-2">
+                <span className="text-[10px] text-slate-400 block">Traffic utilization</span>
+                <strong className="text-slate-200 block">{selectedCorridor ? clamp(selectedCorridor.congestion_score + 11, 0, 100) : 0}%</strong>
+              </div>
+              <div className="bg-[#0B1117] border border-[#1F2937] rounded p-2">
+                <span className="text-[10px] text-slate-400 block">Risk level</span>
+                <strong className="text-amber-400 block">{getCorridorRiskLevel(selectedCorridor)}</strong>
+              </div>
+              <div className="bg-[#0B1117] border border-[#1F2937] rounded p-2">
+                <span className="text-[10px] text-slate-400 block">Regional dependency</span>
+                <strong className="text-slate-200 truncate block">{selectedCorridor?.regional_dependency ?? "Unknown"}</strong>
+              </div>
+            </div>
+            <button type="button" className="w-full mt-1 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-400 text-xs font-semibold py-2 rounded transition-colors" onClick={simulateSelectedCorridorFailure}>
               Simulate Failure
             </button>
           </div>
 
-          <div className="sidebar-section">
-            <h3>Why This Matters</h3>
-            <p>{why.copy[0]}</p>
-            <p>{why.copy[1]}</p>
+          {simulation.failed_route && (
+            <div className="bg-[#030712] border border-red-500/30 rounded-lg p-4 flex flex-col gap-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-semibold text-red-400 uppercase tracking-wider">Route Failure Active</h3>
+                <span className="text-[10px] px-2 py-0.5 rounded bg-red-500/10 text-red-400 border border-red-500/20 font-semibold">FAILED</span>
+              </div>
+              <div className="grid grid-cols-1 gap-2 text-xs">
+                <div className="bg-[#0B1117] border border-red-500/20 rounded p-2">
+                  <span className="text-[10px] text-slate-400 block">Failed Corridor</span>
+                  <strong className="text-red-400 block">{failedCorridor?.name ?? simulation.failed_route}</strong>
+                  <span className="text-[10px] text-slate-500">{failedCorridor?.from} → {failedCorridor?.to}</span>
+                </div>
+                <div className="bg-[#0B1117] border border-emerald-500/20 rounded p-2">
+                  <span className="text-[10px] text-slate-400 block">Backup Corridor</span>
+                  <strong className="text-emerald-400 block">{backupCorridor?.name ?? simulation.rerouted_route ?? "No backup available"}</strong>
+                  {backupCorridor && (
+                    <span className="text-[10px] text-slate-500">{backupCorridor.from} → {backupCorridor.to}</span>
+                  )}
+                </div>
+                <div className="bg-[#0B1117] border border-[#1F2937] rounded p-2">
+                  <span className="text-[10px] text-slate-400 block">Traffic rerouted via</span>
+                  <strong className="text-slate-200 block">
+                    {backupCorridor
+                      ? `${backupCorridor.from} → ${backupCorridor.to} (${backupCorridor.name})`
+                      : simulation.recalculated_paths[0]?.route ?? "Alternate path"}
+                  </strong>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="bg-[#0B1117] border border-[#1F2937] rounded p-2 text-center">
+                    <span className="text-[10px] text-slate-400 block">Congestion</span>
+                    <strong className="text-amber-400 block">{simulation.metrics.new_congestion}%</strong>
+                  </div>
+                  <div className="bg-[#0B1117] border border-[#1F2937] rounded p-2 text-center">
+                    <span className="text-[10px] text-slate-400 block">Redundancy</span>
+                    <strong className="text-[#38BDF8] block">-{simulation.metrics.redundancy_drop}%</strong>
+                  </div>
+                  <div className="bg-[#0B1117] border border-[#1F2937] rounded p-2 text-center">
+                    <span className="text-[10px] text-slate-400 block">Recovery</span>
+                    <strong className="text-slate-200 block">{simulation.metrics.recovery_window_hours}h</strong>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="bg-[#030712] border border-[#1F2937] rounded-lg p-4 flex flex-col gap-2">
+            <h3 className="text-xs font-semibold text-[#38BDF8] uppercase tracking-wider">Why This Matters</h3>
+            <p className="text-xs text-slate-300 leading-relaxed">{why.copy[0]}</p>
+            <p className="text-xs text-slate-300 leading-relaxed">{why.copy[1]}</p>
           </div>
 
-          <div className="sidebar-section">
-            <h3>Who Controls the Rail</h3>
-            <ul className="operator-list">
+          <div className="bg-[#030712] border border-[#1F2937] rounded-lg p-4 flex flex-col gap-2">
+            <h3 className="text-xs font-semibold text-[#38BDF8] uppercase tracking-wider">Who Controls the Rail</h3>
+            <ul className="flex flex-col gap-1.5">
               {operators.slice(0, 6).map((operator) => (
-                <li key={operator.name}>
-                  <strong>{operator.name}</strong>
-                  <span>{operator.influence}</span>
+                <li key={operator.name} className="flex items-center justify-between text-xs py-1 border-b border-[#1F2937]/50 last:border-0">
+                  <strong className="text-slate-200">{operator.name}</strong>
+                  <span className="text-slate-400 text-[11px]">{operator.influence}</span>
                 </li>
               ))}
             </ul>
           </div>
 
-          <div className="sidebar-section">
-            <h3>Functional Filters</h3>
-            <div className="filter-list">
-              <label>
-                <span>Region</span>
-                <select value={filters.region} onChange={(event) => setFilters((prev) => ({ ...prev, region: event.target.value }))}>
-                  <option>All regions</option>
+          <div className="bg-[#030712] border border-[#1F2937] rounded-xl p-5 space-y-4 shadow-sm">
+            <h3 className="text-sm font-semibold text-cyan-400 uppercase tracking-wider">
+              Functional Filters
+            </h3>
+
+            <div className="space-y-4">
+
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1.5">
+                  Region
+                </label>
+                <select
+                  className="w-full h-10 rounded-lg bg-[#0B1117] border border-[#1F2937] px-3 text-sm text-slate-200 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 outline-none transition"
+                  value={filters.region}
+                  onChange={(event) =>
+                    setFilters((prev) => ({
+                      ...prev,
+                      region: event.target.value,
+                    }))
+                  }
+                >
+                  <option value="All regions">All Regions</option>
                   {topology.regions.map((region) => (
-                    <option key={region.name} value={region.name}>{region.name}</option>
+                    <option key={region.name} value={region.name}>
+                      {region.name}
+                    </option>
                   ))}
                 </select>
-              </label>
-              <label>
-                <span>Operator</span>
-                <select value={filters.operator} onChange={(event) => setFilters((prev) => ({ ...prev, operator: event.target.value }))}>
-                  <option>All operators</option>
-                  {operators.map((operator) => (
-                    <option key={operator.name} value={operator.name}>{operator.name}</option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                <span>IXP</span>
-                <select value={filters.ixp} onChange={(event) => setFilters((prev) => ({ ...prev, ixp: event.target.value }))}>
-                  <option>All IXPs</option>
-                  {topology.ixps.map((ixp) => (
-                    <option key={ixp.id} value={ixp.name}>{ixp.name}</option>
-                  ))}
-                </select>
-              </label>
-            </div>
-          </div>
-
-          <button type="button" className="download-button" onClick={handleDownloadSampleData}>Download Sample Data</button>
-        </aside>
-      </section>
-
-      <section className="bottom-grid">
-        <div className="panel">
-          <div className="panel-header">
-            <h2>Facility cards</h2>
-            <span>{filteredFacilities.length} active</span>
-          </div>
-          <div className="facility-grid">
-            {filteredFacilities.slice(0, 4).map((facility) => (
-              <article key={facility.id} className="facility-card">
-                <div className="facility-header">
-                  <strong>{facility.facility_name}</strong>
-                  <span>{facility.country}</span>
-                </div>
-                <div className="facility-meta">
-                  <div>
-                    <label>Operator</label>
-                    <p>{facility.operator}</p>
-                  </div>
-                  <div>
-                    <label>Connected Networks</label>
-                    <p>{facility.connected_networks}</p>
-                  </div>
-                  <div>
-                    <label>Capacity</label>
-                    <p>{facility.capacity} Gbps</p>
-                  </div>
-                  <div>
-                    <label>Importance Score</label>
-                    <p>{facility.importance_score}</p>
-                  </div>
-                </div>
-              </article>
-            ))}
-          </div>
-        </div>
-
-        <div className="panel">
-          <div className="panel-header">
-            <h2>Path concentration</h2>
-          </div>
-          <div className="concentration-list">
-            {pathConcentration.most_critical.map((item) => (
-              <div key={item.name} className="concentration-item">
-                <div>
-                  <strong>{item.name}</strong>
-                  <small>{item.regional_dependency}</small>
-                </div>
-                <div className="concentration-score">
-                  <span>{item.congestion_score}</span>
-                  <small>Congestion</small>
-                </div>
-                <div className="concentration-score">
-                  <span>{item.redundancy_score}</span>
-                  <small>Redundancy</small>
-                </div>
               </div>
-            ))}
-          </div>
-        </div>
-      </section>
 
-      <section className="bottom-grid simulation-grid">
-        <div className="panel">
-          <div className="panel-header">
-            <h2>Route failure simulation</h2>
-            <span>{simulation.status}</span>
-          </div>
-          <div className="simulation-controls">
-            <label>
-              <span>IXP</span>
-              <select value={simulation.selected_ixp} onChange={(event) => updateSimulationSelection("selected_ixp", event.target.value)}>
-                {topology.ixps.map((ixp) => (
-                  <option key={ixp.id} value={ixp.name}>{ixp.name}</option>
-                ))}
-              </select>
-            </label>
-            <label>
-              <span>Facility</span>
-              <select value={simulation.selected_facility} onChange={(event) => updateSimulationSelection("selected_facility", event.target.value)}>
-                {facilities.map((facility) => (
-                  <option key={facility.id} value={facility.facility_name}>{facility.facility_name}</option>
-                ))}
-              </select>
-            </label>
-            <label>
-              <span>Cable</span>
-              <select value={simulation.selected_cable} onChange={(event) => updateSimulationSelection("selected_cable", event.target.value)}>
-                {topology.corridors.map((corridor) => (
-                  <option key={corridor.id} value={corridor.name}>{corridor.name}</option>
-                ))}
-              </select>
-            </label>
-          </div>
-          <div className="impact-box">
-            <div>
-              <span>Affected traffic</span>
-              <strong>{simulation.affected_traffic}</strong>
-            </div>
-            <div>
-              <span>Impacted regions</span>
-              <strong>{simulation.impacted_regions.join(", ")}</strong>
-            </div>
-          </div>
-          <ul className="recalculated-list">
-            {simulation.recalculated_paths.map((path) => (
-              <li key={path.route}>
-                <span>{path.route}</span>
-                <em>{path.status}</em>
-              </li>
-            ))}
-          </ul>
-        </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1.5">
+                  Operator
+                </label>
+                <select
+                  className="w-full h-10 rounded-lg bg-[#0B1117] border border-[#1F2937] px-3 text-sm text-slate-200 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 outline-none transition"
+                  value={filters.operator}
+                  onChange={(event) =>
+                    setFilters((prev) => ({
+                      ...prev,
+                      operator: event.target.value,
+                    }))
+                  }
+                >
+                  <option value="All operators">All Operators</option>
+                  {operators.map((operator) => (
+                    <option key={operator.name} value={operator.name}>
+                      {operator.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-        <div className="panel">
-          <div className="panel-header">
-            <h2>Who controls the rail</h2>
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1.5">
+                  Internet Exchange Point (IXP)
+                </label>
+                <select
+                  className="w-full h-10 rounded-lg bg-[#0B1117] border border-[#1F2937] px-3 text-sm text-slate-200 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 outline-none transition"
+                  value={filters.ixp}
+                  onChange={(event) =>
+                    setFilters((prev) => ({
+                      ...prev,
+                      ixp: event.target.value,
+                    }))
+                  }
+                >
+                  <option value="All IXPs">All IXPs</option>
+                  {topology.ixps.map((ixp) => (
+                    <option key={ixp.id} value={ixp.name}>
+                      {ixp.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+            </div>
           </div>
-          <ul className="owner-list">
-            {operators.map((operator) => (
-              <li key={operator.name}>
-                <div>
-                  <strong>{operator.name}</strong>
-                  <small>{operator.ownership}</small>
-                </div>
-                <span>{operator.influence}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      </section>
-    </main>
+
+          <button type="button" className="w-full bg-[#38BDF8]/10 hover:bg-[#38BDF8]/20 border border-[#38BDF8]/30 text-[#38BDF8] text-xs font-semibold py-2.5 rounded transition-colors" onClick={handleDownloadSampleData}>
+            Download Sample Data
+          </button>
+        </aside>
+      </div>
+    </div>
   );
 }

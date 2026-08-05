@@ -15,7 +15,8 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Internet Backbone & IXP Map",
-  description: "Real Rails Intelligence Library dashboard for global Internet backbone and IXP monitoring.",
+  description:
+    "Real Rails Intelligence Library dashboard for global Internet backbone and IXP monitoring.",
 };
 
 export default function RootLayout({
@@ -26,9 +27,11 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable}`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="bg-[#030712] text-white overflow-x-hidden">
+        {children}
+      </body>
     </html>
   );
 }
