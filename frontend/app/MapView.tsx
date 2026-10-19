@@ -11,6 +11,7 @@ const TileLayerAny: any = TileLayer;
 const PolylineAny: any = Polyline;
 const CircleMarkerAny: any = CircleMarker;
 const TooltipAny: any = Tooltip;
+const MarkerAny: any = Marker;
 
 function MapInvalidator() {
   const map = useMap();
@@ -24,8 +25,6 @@ function MapInvalidator() {
 
   return null;
 }
-
-const MarkerAny: any = Marker;
 
 const routeAnchors: Record<string, [number, number]> = {
   London: [51.5074, -0.1278],
@@ -61,6 +60,15 @@ const backupLabelIcon = L.divIcon({
   iconAnchor: [36, 11],
 });
 
+// Icon helper for permanent place name labels
+const createCityLabelIcon = (cityName: string) =>
+  L.divIcon({
+    className: "city-name-label",
+    html: `<span style="color: #e2e8f0; font-weight: 600; font-size: 11px; text-shadow: 0 1px 3px rgba(0,0,0,0.9); background: rgba(15, 23, 42, 0.85); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.15); white-space: nowrap;">${cityName}</span>`,
+    iconSize: [100, 20],
+    iconAnchor: [-10, 10], // Offsets the text slightly to the right of the anchor node
+  });
+
 const getRiskLevel = (route: any) => {
   if (route.congestion_score >= 80 || route.redundancy_score <= 60) return "Critical";
   if (route.congestion_score >= 70 || route.redundancy_score <= 70) return "High";
@@ -74,7 +82,6 @@ const matchesRoute = (targetState: any, routeName: string) => {
   return targetState === routeName;
 };
 
-// Restored original dashArrays and opacities so lines look continuous and flowing
 const getRouteStyle = (route: any, simulation: any, hoveredRouteId: string | null) => {
   const isFailed = matchesRoute(simulation.failed_route, route.name);
   const isRerouted = matchesRoute(simulation.rerouted_route, route.name);
@@ -86,7 +93,7 @@ const getRouteStyle = (route: any, simulation: any, hoveredRouteId: string | nul
       className: "corridor-route corridor-route--failed",
       color: "#ef4444",
       weight: 5,
-      opacity: 0.35, // Match original failed opacity
+      opacity: 0.35,
       dashArray: "8 12",
       lineCap: "round",
     };
@@ -94,14 +101,14 @@ const getRouteStyle = (route: any, simulation: any, hoveredRouteId: string | nul
 
   if (isRerouted) {
     return {
-        className: "corridor-route corridor-route--rerouted",
-        color: "#22c55e",
-        weight: 7,
-        opacity: 1,
-        dashArray: undefined,
-        lineCap: "round",
+      className: "corridor-route corridor-route--rerouted",
+      color: "#22c55e",
+      weight: 7,
+      opacity: 1,
+      dashArray: undefined,
+      lineCap: "round",
     };
-    }
+  }
 
   if (isSelected) {
     return {
@@ -109,7 +116,7 @@ const getRouteStyle = (route: any, simulation: any, hoveredRouteId: string | nul
       color: "#38bdf8",
       weight: 4,
       opacity: 1,
-      dashArray: "12 10", // Restored original selected dash pattern
+      dashArray: "12 10",
       lineCap: "round",
     };
   }
@@ -129,8 +136,8 @@ const getRouteStyle = (route: any, simulation: any, hoveredRouteId: string | nul
     className: "corridor-route",
     color: "#818cf8",
     weight: 3,
-    opacity: 0.82, // Restored original default opacity
-    dashArray: "16 14", // Restored original default dash pattern
+    opacity: 0.82,
+    dashArray: "16 14",
     lineCap: "round",
   };
 };
@@ -163,7 +170,6 @@ export default function MapView({
   const mapRoutes = useMemo(() => {
     return topology.corridors
       .map((corridor: any) => {
-        // Fix: Strictly connect 'from' anchor to 'to' anchor (ignore broken backend path arrays)
         const fromPos = routeAnchors[corridor.from?.trim()];
         const toPos = routeAnchors[corridor.to?.trim()];
         
@@ -199,43 +205,43 @@ export default function MapView({
     setHoveredRouteId((currentId) => (currentId === routeId ? null : currentId));
   }, []);
 
-    const onIxpClick = useCallback((ixp: any) => {
-        setSimulation((prev: any) => ({
-            ...prev,
-            selected_ixp: ixp.name,
-            selected_facility: "",
-        }));
+  const onIxpClick = useCallback((ixp: any) => {
+    setSimulation((prev: any) => ({
+      ...prev,
+      selected_ixp: ixp.name,
+      selected_facility: "",
+    }));
 
-        setFilters((prev: any) => ({
-            ...prev,
-            ixp: ixp.name,
-        }));
+    setFilters((prev: any) => ({
+      ...prev,
+      ixp: ixp.name,
+    }));
 
-        setMapFilters((prev: any) => ({
-            ...prev,
-            region: ixp.region,
-            facility: "All facilities",
-        }));
-    }, [setSimulation, setFilters, setMapFilters]);
+    setMapFilters((prev: any) => ({
+      ...prev,
+      region: ixp.region,
+      facility: "All facilities",
+    }));
+  }, [setSimulation, setFilters, setMapFilters]);
 
-    const onFacilityClick = useCallback((facility: any) => {
-        setSimulation((prev: any) => ({
-            ...prev,
-            selected_facility: facility.facility_name,
-            selected_ixp: "",
-        }));
+  const onFacilityClick = useCallback((facility: any) => {
+    setSimulation((prev: any) => ({
+      ...prev,
+      selected_facility: facility.facility_name,
+      selected_ixp: "",
+    }));
 
-        setMapFilters((prev: any) => ({
-            ...prev,
-            facility: facility.facility_name,
-            region: facility.region,
-        }));
+    setMapFilters((prev: any) => ({
+      ...prev,
+      facility: facility.facility_name,
+      region: facility.region,
+    }));
 
-        setFilters((prev: any) => ({
-            ...prev,
-            ixp: "All IXPs",
-        }));
-    }, [setSimulation, setMapFilters, setFilters]);
+    setFilters((prev: any) => ({
+      ...prev,
+      ixp: "All IXPs",
+    }));
+  }, [setSimulation, setMapFilters, setFilters]);
 
   const renderedRoutes = useMemo(() => {
     return mapRoutes.map((route) => (
@@ -290,6 +296,18 @@ export default function MapView({
       ];
     });
   }, [mapRoutes, simulation.failed_route, simulation.rerouted_route]);
+
+  const renderedCityLabels = useMemo(() => {
+    return Object.entries(routeAnchors).map(([cityName, coords]) => (
+      <MarkerAny
+        key={`city-label-${cityName}`}
+        position={coords}
+        icon={createCityLabelIcon(cityName)}
+        interactive={false}
+        zIndexOffset={500}
+      />
+    ));
+  }, []);
 
   const renderedIXPs = useMemo(() => {
     return topology.ixps.map((ixp: any) => {
@@ -481,11 +499,12 @@ export default function MapView({
         >
           <MapInvalidator />
           <TileLayerAny
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
-            url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
           {renderedRoutes}
           {routeStatusLabels}
+          {renderedCityLabels}
           {renderedIXPs}
           {renderedFacilities}
           {renderedStations}
